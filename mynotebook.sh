@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: mynotebook.sh
-# Version: 0.0
+# Version: 0.1
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in:
+# Modified in: 2018-04-29
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v0.1 - 2018-04-29: use of a socket for SSH tunnel
 # v0.0 - 2017-11-05: creation
 
 version=$(grep -i -m 1 "version" "$0" | cut -d ":" -f 2 | sed "s/^ *//g")
@@ -94,7 +95,7 @@ myport_j=$(echo "$mysvr" | cut -d ":" -f 3 | cut -d "/" -f 1)
 #mytoken_j=$(echo "$mysvr" | cut -d ":" -f 3 | cut -d "/" -f 2)
 
 # Select port on localhost
-port_list=$(netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq)
+port_list=$(netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 3 | cut -d ":" -f 2 | sort | uniq)
 for ((i=$myport_j ; i <= 40000 ; i++))
 do
     [[ $(echo "$port_list" | grep -w $i) ]] || break
@@ -105,7 +106,7 @@ info "Port used on localhost: $myport_l"
 [[ $myport_l != $myport_j ]] && mysvr=$(echo "$mysvr" | sed "s;:$myport_j/;:$myport_l/;")
 
 # Select port on remote server (host1)
-port_list=$(ssh $host1 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
+port_list=$(ssh -A $host1 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
 for ((i=9999 ; i <= 40000 ; i++))
 do
     [[ $(echo "$port_list" | grep -w $i) ]] || break
@@ -114,22 +115,25 @@ done
 myport_r=$i
 info "Port used for the SSH tunnel on $host1: $myport_r"
 
+mysocket=/tmp/${USER}_jupyter_socket
+
 # Create tunnel
-ssh -o ServerAliveInterval=600 -L ${myport_l}:localhost:${myport_r} $host1 -A ssh -L ${myport_r}:localhost:${myport_j} -N $host2 &
+ssh -M -S $mysocket -fA -o ServerAliveInterval=600 -L ${myport_l}:localhost:${myport_r} $host1 ssh -L ${myport_r}:localhost:${myport_j} -N $host2 
 
 # Identify PID of the tunnel
 mypid=$(pgrep -P $$)
 mypid=$(echo "$mypid" | tr "\n" " ")
 
 function portk {
-    ssh $host1 "kill \$(ps ux | grep \"ssh -L ${myport_r}:localhost:$1 -N $host2\" | grep -v grep |  sed \"s/  */\t/g\" | cut -f 2)"
+    ssh -A $host1 "kill \$(ps ux | grep \"ssh -L ${myport_r}:localhost:$1 -N $host2\" | grep -v grep |  sed \"s/  */\t/g\" | cut -f 2)"
 }
 
-
+echo $mypid
 # Create trap to close ssh tunnel when interrupt
-trap "kill $mypid ; portk ${myport_j}" SIGINT SIGTERM
+trap "ssh -S $mysocket -O exit $host1 ; portk ${myport_j}" SIGINT SIGTERM
 
 # Start Jupyter page
+echo "$mysvr"
 info "Starting Firefox tab..."
 sleep 2s
 firefox "$mysvr" &
