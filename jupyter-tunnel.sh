@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 1.0
+# Version: 1.1
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2018-07-28
+# Modified in: 2019-12-12
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v1.1 - 2019-12-12: sshpass added / bind message error solved by using ssh -4
 # v1.0 - 2018-07-28: script renamed / help message and options added / ssh-agent check added / ssh-agent forcing option added / SSH option updated / safety bash script options
 # v0.1 - 2018-04-29: use of a socket for SSH tunnel
 # v0.0 - 2017-11-05: creation
@@ -35,7 +36,7 @@ version=$(grep -i -m 1 "version" "$0" | cut -d ":" -f 2 | sed "s/^ *//g")
 # Usage message
 function usage {
     echo -e "
-    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -b|--browser path -j|--j_loc path -s|--ssha -h|--help
+    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -b|--browser path -j|--j_loc path -s|--ssha -p|--sshp -h|--help
 
 Aim: $aim
 
@@ -47,6 +48,7 @@ Options:
     -b,  --browser  path to the internet browser to start after connection is up [default: firefox]
     -j,  --j_loc    path to the jupyer executable on host2 [default: \$HOME/local/bin/jupyter]
     -s,  --ssha     force the creation of a new ssh agent
+    -p,  --pass     use sshpass to store ssh password
     -h,  --help     this message
     "
 }
@@ -129,6 +131,7 @@ do
         -b|--browser ) browser="$2" ; shift 2 ;;
         -j|--j_loc   ) j_loc="$2"   ; shift 2 ;;
         -s|--ssha    ) ssha=1       ; shift   ;;
+        -p|--sshp    ) sshp=1       ; shift   ;;
         -h|--help    ) usage ; exit 0 ;;
         *            ) error "Invalid option: $1\n$(usage)" 1 ;;
     esac
@@ -147,6 +150,18 @@ test_dep "$browser"
 # SHH agent
 [[ -z "$SSH_AUTH_SOCK" || -n "$ssha" ]] && sshk=1 && eval $(ssh-agent) &> /dev/null
 
+# SSH password
+if [[ -n "$sshp" ]]
+then
+    test_dep sshpass
+    read -sp "Enter SSH password: " SSHPASS
+    export SSHPASS
+    echo ""
+    myssh="sshpass -e ssh"
+else
+    myssh=ssh
+fi
+
 
 
 #============#
@@ -154,7 +169,7 @@ test_dep "$browser"
 #============#
 
 # List Jupyter servers
-mysvr=$(ssh -q -A -o AddKeysToAgent=yes $host1 "ssh $host2 '$j_loc notebook list | tail -n +2 | cut -d \" \" -f 1'")
+mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '$j_loc notebook list | tail -n +2 | cut -d \" \" -f 1'")
 
 # Check how many Jupyter servers are running
 [[ -z "$mysvr" ]] && error "No server is running. Exiting..." 1
@@ -176,7 +191,7 @@ info "Port used on localhost: $myport_l"
 [[ $myport_l != $myport_j ]] && mysvr=$(echo "$mysvr" | sed "s;:$myport_j/;:$myport_l/;")
 
 # Select port on remote server (host1)
-port_list=$(ssh -q $host1 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
+port_list=$($myssh -q $host1 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
 for ((i=9999 ; i <= 40000 ; i++))
 do
     [[ $(echo "$port_list" | grep -w $i) ]] || break
@@ -189,18 +204,18 @@ mysocket=/tmp/${USER}_jupyter_socket
 
 # Create tunnel (must deactivate set -e using set +e otherwise script exit)
 set +e
-ssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -L ${myport_r}:localhost:${myport_j} -N $host2
+$myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_j} -N $host2
 
 # Identify PID of the tunnel
 mypid=$(pgrep -P $$)
 mypid=$(echo "$mypid" | tr "\n" " ")
 
 function portk {
-    ssh -q -A $host1 "kill \$(ps ux | grep \"ssh -L ${myport_r}:localhost:$1 -N $host2\" | grep -v grep |  sed \"s/  */\t/g\" | cut -f 2)"
+    $myssh -q -A $host1 "kill \$(ps ux | grep \"ssh .*-L ${myport_r}:localhost:$1 -N $host2\" | grep -v grep |  sed \"s/  */\t/g\" | cut -f 2)"
 }
 
 # Create trap to close ssh tunnel when interrupt
-trap "ssh -q -S $mysocket -O exit $host1 ; portk ${myport_j}" SIGINT SIGTERM
+trap "$myssh -q -S $mysocket -O exit $host1 ; portk ${myport_j}" SIGINT SIGTERM
 
 # Reactivate error detection
 set -e
