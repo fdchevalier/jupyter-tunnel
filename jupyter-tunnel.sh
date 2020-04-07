@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 1.1
+# Version: 1.2
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2019-12-12
+# Modified in: 2020-04-07
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v1.2 - 2020-04-07: detection of jupyter improved
 # v1.1 - 2019-12-12: sshpass added / bind message error solved by using ssh -4
 # v1.0 - 2018-07-28: script renamed / help message and options added / ssh-agent check added / ssh-agent forcing option added / SSH option updated / safety bash script options
 # v0.1 - 2018-04-29: use of a socket for SSH tunnel
@@ -36,7 +37,7 @@ version=$(grep -i -m 1 "version" "$0" | cut -d ":" -f 2 | sed "s/^ *//g")
 # Usage message
 function usage {
     echo -e "
-    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -b|--browser path -j|--j_loc path -s|--ssha -p|--sshp -h|--help
+    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -b|--browser path -s|--ssha -p|--sshp -h|--help
 
 Aim: $aim
 
@@ -46,7 +47,6 @@ Options:
     -h1, --host1    first host to connect to set the tunnel up
     -h2, --host2    second host to connect on which Jupyter server is running
     -b,  --browser  path to the internet browser to start after connection is up [default: firefox]
-    -j,  --j_loc    path to the jupyer executable on host2 [default: \$HOME/local/bin/jupyter]
     -s,  --ssha     force the creation of a new ssh agent
     -p,  --pass     use sshpass to store ssh password
     -h,  --help     this message
@@ -129,7 +129,6 @@ do
         -h1|--host1  ) host1="$2"   ; shift 2 ;;
         -h2|--host2  ) host2="$2"   ; shift 2 ;;
         -b|--browser ) browser="$2" ; shift 2 ;;
-        -j|--j_loc   ) j_loc="$2"   ; shift 2 ;;
         -s|--ssha    ) ssha=1       ; shift   ;;
         -p|--sshp    ) sshp=1       ; shift   ;;
         -h|--help    ) usage ; exit 0 ;;
@@ -143,9 +142,6 @@ done
 
 # Test existence of the browser
 test_dep "$browser"
-
-# Default Jupyter location
-[[ -z "$j_loc" ]] && j_loc="\$HOME/local/bin/jupyter"
 
 # SHH agent
 [[ -z "$SSH_AUTH_SOCK" || -n "$ssha" ]] && sshk=1 && eval $(ssh-agent) &> /dev/null
@@ -169,7 +165,7 @@ fi
 #============#
 
 # List Jupyter servers
-mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '$j_loc notebook list | tail -n +2 | cut -d \" \" -f 1'")
+mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep jupyter-notebook | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
 
 # Check how many Jupyter servers are running
 [[ -z "$mysvr" ]] && error "No server is running. Exiting..." 1
