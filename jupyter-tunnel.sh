@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 1.2
+# Version: 1.3
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2020-04-07
+# Modified in: 2020-04-21
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v1.3 - 2020-04-21: no browser option added
 # v1.2 - 2020-04-07: detection of jupyter improved
 # v1.1 - 2019-12-12: sshpass added / bind message error solved by using ssh -4
 # v1.0 - 2018-07-28: script renamed / help message and options added / ssh-agent check added / ssh-agent forcing option added / SSH option updated / safety bash script options
@@ -47,6 +48,7 @@ Options:
     -h1, --host1    first host to connect to set the tunnel up
     -h2, --host2    second host to connect on which Jupyter server is running
     -b,  --browser  path to the internet browser to start after connection is up [default: firefox]
+                        \"n\" or \"none\" prevent starting the browser.
     -s,  --ssha     force the creation of a new ssh agent
     -p,  --pass     use sshpass to store ssh password
     -h,  --help     this message
@@ -99,7 +101,7 @@ function test_dep {
     which $1 &> /dev/null
     if [[ $? != 0 ]]
     then
-        error "Package $1 is needed. Exiting..." 1
+        error "$1 not found. Exiting..." 1
     fi
 }
 
@@ -117,10 +119,6 @@ test_dep ssh
 #===========#
 # Variables #
 #===========#
-
-# Set bash options to stop script if a command exit with non-zero status
-set -e
-set -o pipefail
 
 # Options
 while [[ $# -gt 0 ]]
@@ -141,7 +139,7 @@ done
 [[ -z "$browser" ]] && browser=firefox
 
 # Test existence of the browser
-test_dep "$browser"
+[[ "$browser" != n && "$browser" != none ]] && test_dep "$browser"
 
 # SHH agent
 [[ -z "$SSH_AUTH_SOCK" || -n "$ssha" ]] && sshk=1 && eval $(ssh-agent) &> /dev/null
@@ -163,6 +161,10 @@ fi
 #============#
 # Processing #
 #============#
+
+# Set bash options to stop script if a command exit with non-zero status
+set -e
+set -o pipefail
 
 # List Jupyter servers
 mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep jupyter-notebook | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
@@ -220,10 +222,13 @@ set -e
 #mysvr=$(echo "$mysvr/$mytoken_j/" | sed "s,//*,/,g")
 
 # Start Jupyter page
-echo "$mysvr"
-info "Starting Firefox tab..."
-sleep 2s
-firefox "$mysvr" &
+if [[ "$browser" != n && "$browser" != none ]]
+then
+    echo "$mysvr"
+    info "Opening the browser tab..."
+    sleep 2s
+    firefox "$mysvr" &
+fi
 
 # Wait until interruption
 info "Once done with Jupyter, use Ctrl-C to close the SSH tunnel..."
