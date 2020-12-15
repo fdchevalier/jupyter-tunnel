@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 1.3
+# Version: 2.0
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2020-04-21
+# Modified in: 2020-12-14
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v2.0 - 2020-12-14: option to reach server running on a node of GE added
 # v1.3 - 2020-04-21: no browser option added
 # v1.2 - 2020-04-07: detection of jupyter improved
 # v1.1 - 2019-12-12: sshpass added / bind message error solved by using ssh -4
@@ -38,7 +39,7 @@ version=$(grep -i -m 1 "version" "$0" | cut -d ":" -f 2 | sed "s/^ *//g")
 # Usage message
 function usage {
     echo -e "
-    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -b|--browser path -s|--ssha -p|--sshp -h|--help
+    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -n|--node name -b|--browser path -s|--ssha -p|--sshp -h|--help
 
 Aim: $aim
 
@@ -49,6 +50,7 @@ Options:
     -h2, --host2    second host to connect on which Jupyter server is running
     -b,  --browser  path to the internet browser to start after connection is up [default: firefox]
                         \"n\" or \"none\" prevent starting the browser.
+    -n,  --node     node of the Grid Engine cluster running the Jupyter server (optional)
     -s,  --ssha     force the creation of a new ssh agent
     -p,  --pass     use sshpass to store ssh password
     -h,  --help     this message
@@ -127,6 +129,7 @@ do
         -h1|--host1  ) host1="$2"   ; shift 2 ;;
         -h2|--host2  ) host2="$2"   ; shift 2 ;;
         -b|--browser ) browser="$2" ; shift 2 ;;
+        -n|--node    ) node="$2"    ; shift 2 ;;
         -s|--ssha    ) ssha=1       ; shift   ;;
         -p|--sshp    ) sshp=1       ; shift   ;;
         -h|--help    ) usage ; exit 0 ;;
@@ -166,16 +169,34 @@ fi
 set -e
 set -o pipefail
 
-# List Jupyter servers
-mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep jupyter-notebook | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
+if [[ -z "$node" ]]
+then
+    # List Jupyter servers
+    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep jupyter-notebook | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
 
-# Check how many Jupyter servers are running
-[[ -z "$mysvr" ]] && error "No server is running. Exiting..." 1
-[[ $(echo "$mysvr" | wc -l) -gt 1 ]] && error "More than one server is running. Exiting..." 1
+    # Check how many Jupyter servers are running
+    [[ -z "$mysvr" ]] && error "No server is running. Exiting..." 1
+    [[ $(wc -l <<< "$mysvr") -gt 1 ]] && error "More than one server is running. Exiting..." 1
+else
+    # Connect to the node and get PID of the Jupyter server (set +/-e to deactivate/reactivate error check otherwise script exits if no notebook)
+    set +e
+    mypid_j=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 ssh $node 'pgrep -f jupyter-notebook'")
+    set -e
+    
+    # Check how many Jupyter servers are running
+    [[ -z "$mypid_j" ]] && error "No server is running. Exiting..." 1
+    [[ $(wc -l <<< "$mypid_j") -gt 1 ]] && error "More than one server is running. Exiting..." 1
 
-# Identify port and ton
+    # Get server address from the notebook connection file
+    ## Note: runtime folder can be obtained using jupyter --path 
+    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 'cat \$HOME/.local/share/jupyter/runtime/nbserver-$mypid_j-open.html | grep \"a href\" | cut -d \"\\\"\" -f 2'")
+
+    # Replace node with localhost
+    mysvr=$(sed -r "s|(^h.*/).*(:.*$)|\1localhost\2|" <<< "$mysvr")
+fi
+
+# Identify port and token
 myport_j=$(echo "$mysvr" | cut -d ":" -f 3 | cut -d "/" -f 1)
-mytoken_j=$(echo "$mysvr" | cut -d ":" -f 3 | cut -d "/" -f 2)
 
 # Select port on localhost
 port_list=$(netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 3 | cut -d ":" -f 2 | sort | uniq)
@@ -194,32 +215,47 @@ for ((i=9999 ; i <= 40000 ; i++))
 do
     [[ $(echo "$port_list" | grep -w $i) ]] || break
 done
-
 myport_r=$i
 info "Port used for the SSH tunnel on $host1: $myport_r"
 
+# Select port on remote server (host2)
+if [[ -n "$node" ]]
+then
+    port_list=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 ssh $host2 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
+    for ((i=9999 ; i <= 40000 ; i++))
+    do
+        [[ $(echo "$port_list" | grep -w $i) ]] || break
+    done
+    myport_r2=$i
+    info "Port used for the SSH tunnel on $host2: $myport_r2"
+fi
+
 mysocket=/tmp/${USER}_jupyter_socket
 
-# Create tunnel (must deactivate set -e using set +e otherwise script exit)
+# Create tunnel (must deactivate set -e using set +e otherwise script exits)
 set +e
-$myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_j} -N $host2
+
+if [[ -z "$node" ]]
+then
+    $myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_j} -N $host2
+else
+    $myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_r2} $host2 ssh -4 -L ${myport_r2}:$node:${myport_j} -N $node
+fi
 
 # Identify PID of the tunnel
 mypid=$(pgrep -P $$)
 mypid=$(echo "$mypid" | tr "\n" " ")
 
 function portk {
-    $myssh -q -A $host1 "kill \$(ps ux | grep \"ssh .*-L ${myport_r}:localhost:$1 -N $host2\" | grep -v grep |  sed \"s/  */\t/g\" | cut -f 2)"
+    [[ -z $4 ]] && $myssh -q -A $host1 "pkill \"ssh .*-L $2:localhost:$1 -N $host2\""
+    [[ -n $4 ]] && $myssh -q -A $host1 ssh $host2 pkill -f \\\"ssh .*-L $3:$4:$1 -N $4\\\"
 }
 
 # Create trap to close ssh tunnel when interrupt
-trap "$myssh -q -S $mysocket -O exit $host1 ; portk ${myport_j}" SIGINT SIGTERM
+trap "$myssh -q -S $mysocket -O exit $host1 ; portk ${myport_j} ${myport_r} ${myport_r2} ${node}" SIGINT SIGTERM
 
 # Reactivate error detection
 set -e
-
-# Update server address
-#mysvr=$(echo "$mysvr/$mytoken_j/" | sed "s,//*,/,g")
 
 # Start Jupyter page
 if [[ "$browser" != n && "$browser" != none ]]
