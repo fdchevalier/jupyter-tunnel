@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 2.0
+# Version: 2.1
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2020-12-14
+# Modified in: 2020-12-23
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v2.1 - 2020-12-23: bug related to connection closing corrected / connection testing added / unnecessary code removed
 # v2.0 - 2020-12-14: option to reach server running on a node of GE added
 # v1.3 - 2020-04-21: no browser option added
 # v1.2 - 2020-04-07: detection of jupyter improved
@@ -165,6 +166,11 @@ fi
 # Processing #
 #============#
 
+# Check connectivity
+mytest=$($myssh -q -A -4 $host1 echo 0)
+[[ -z "$mytest" ]] && error "Wrong password or no connection. Exiting..." 1
+
+
 # Set bash options to stop script if a command exit with non-zero status
 set -e
 set -o pipefail
@@ -242,20 +248,14 @@ else
     $myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_r2} $host2 ssh -4 -L ${myport_r2}:$node:${myport_j} -N $node
 fi
 
-# Identify PID of the tunnel
-mypid=$(pgrep -P $$)
-mypid=$(echo "$mypid" | tr "\n" " ")
-
+# Close connections
 function portk {
-    [[ -z $4 ]] && $myssh -q -A $host1 "pkill \"ssh .*-L $2:localhost:$1 -N $host2\""
+    [[ -z $4 ]] && $myssh -q -A $host1 "pkill -f \"ssh .*-L $2:localhost:$1 -N $host2\""
     [[ -n $4 ]] && $myssh -q -A $host1 ssh $host2 pkill -f \\\"ssh .*-L $3:$4:$1 -N $4\\\"
 }
 
 # Create trap to close ssh tunnel when interrupt
 trap "$myssh -q -S $mysocket -O exit $host1 ; portk ${myport_j} ${myport_r} ${myport_r2} ${node}" SIGINT SIGTERM
-
-# Reactivate error detection
-set -e
 
 # Start Jupyter page
 if [[ "$browser" != n && "$browser" != none ]]
@@ -270,6 +270,9 @@ fi
 info "Once done with Jupyter, use Ctrl-C to close the SSH tunnel..."
 
 sleep inf
+
+# Reactivate error detection
+set -e
 
 # Kill SSH agent if it was started with the script
 [[ -n "$sshk" ]] && ssh-agent -k
