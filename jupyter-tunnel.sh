@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 2.1
+# Version: 2.2
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2020-12-23
+# Modified in: 2021-01-07
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v2.2 - 2021-01-07: bug related to local port detection corrected / bug related to socket and multiple connections corrected
 # v2.1 - 2020-12-23: bug related to connection closing corrected / connection testing added / unnecessary code removed
 # v2.0 - 2020-12-14: option to reach server running on a node of GE added
 # v1.3 - 2020-04-21: no browser option added
@@ -205,7 +206,7 @@ fi
 myport_j=$(echo "$mysvr" | cut -d ":" -f 3 | cut -d "/" -f 1)
 
 # Select port on localhost
-port_list=$(netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 3 | cut -d ":" -f 2 | sort | uniq)
+port_list=$(netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq)
 for ((i=$myport_j ; i <= 40000 ; i++))
 do
     [[ $(echo "$port_list" | grep -w $i) ]] || break
@@ -236,7 +237,7 @@ then
     info "Port used for the SSH tunnel on $host2: $myport_r2"
 fi
 
-mysocket=/tmp/${USER}_jupyter_socket
+mysocket=/tmp/${USER}_jupyter_socket_$RANDOM
 
 # Create tunnel (must deactivate set -e using set +e otherwise script exits)
 set +e
