@@ -1,6 +1,6 @@
 # jupyter-tunnel
 
-The purpose of this script is to connect to a remote [Jupyter notebook](https://jupyter.org/) server through an SSH tunnel. Jupyter notebooks are informatic notebooks that allow executing code and giving context, with the goal of keeping records and improving reproducibility. When a Jupyter notebook server is running remotely, you can connect to it by opening a remote web browser. However, this is usually slow (especially if connection is bad), consumes uncessary server resources, and forces you to have an additional web browser opened. The tunnel created by this script avoids this by allowing your local browser to connect to the remote server and sending the needed information through the tunnel.
+The purpose of this script is to connect to a remote [Jupyter notebook](https://jupyter.org/) server through an SSH tunnel. Jupyter notebooks are informatics notebooks that allow executing code and giving context, with the goal of keeping records and improving reproducibility. When a Jupyter notebook server is running remotely, you can connect to it by opening a remote web browser. However, this is usually slow (especially if connection is bad), consumes unnecessary server resources, and forces you to have an additional web browser opened. The tunnel created by this script avoids this by allowing your local browser to connect to the remote server and sending the needed information through the tunnel.
 
 In addition to connecting to Jupyter notebook server on a standalone remote server, this script allows connection to Jupyter notebook server running on a node of a Grid Engine cluster.
 
@@ -21,7 +21,7 @@ To download the latest version of the script:
 git clone https://github.com/fdchevalier/jupyter-tunnel
 ```
 
-For convenience, the script should be accessible system-wide by either including the folder in your `$PATH` or by moving the script in a folder present in your path (e.g. `$HOME/local/bin/`).
+For convenience, the script should be accessible system-wide by either including the folder in your `$PATH` or by moving the scripts in a folder present in your path (e.g. `$HOME/.local/bin/`).
 
 
 ## Usage
@@ -60,6 +60,12 @@ There are two cases that you can encounter:
 * The Jupyter notebook is running on a node of a Grid Engine cluster accessible through a gateway server. In this case, the basic command will be: `jupypter-tunnel.sh -h1 user@gateway.ext -h2 user@head-node.ext -n server-node.local`
 
 Note: the `user@server` can be simplified to `server` if you use a SSH config file or if the username of your local machine is the same as the one on the remote machine.
+
+
+## Companion script
+
+`jupyter-tunnel-shutdown.sh`: this script sends an interruption signal to any jupyter-tunnel processes. This is equivalent to Ctrl+C used to close the tunnel. This script can be to automatize tunnel shutdown on sleep for instance in order to make sure that port on server will be released.
+
 
 ## License
 
