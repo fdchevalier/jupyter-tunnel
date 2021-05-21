@@ -62,9 +62,10 @@ There are two cases that you can encounter:
 Note: the `user@server` can be simplified to `server` if you use a SSH config file or if the username of your local machine is the same as the one on the remote machine.
 
 
-## Companion script
+## Companion scripts
 
-`jupyter-tunnel-shutdown.sh`: this script sends an interruption signal to any jupyter-tunnel processes. This is equivalent to Ctrl+C used to close the tunnel. This script can be to automatize tunnel shutdown on sleep for instance in order to make sure that port on server will be released.
+* `jupyter-tunnel-shutdown.sh`: this script sends an interruption signal to any jupyter-tunnel processes. This is equivalent to Ctrl+C used to close the tunnel. This script can be to automatize tunnel shutdown on sleep for instance in order to make sure that port on server will be released.
+* `jupyter-node.sh`: this script starts a Jupyter server on a node of a SGE cluster from the head node. 
 
 
 ## License
