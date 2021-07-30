@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 2.2
+# Version: 2.3
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2021-01-07
+# Modified in: 2021-07-30
 # Licence : GPL v3
 
 
@@ -12,7 +12,7 @@
 # Aims #
 #======#
 
-aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely and start the internet browser."
+aim="Create a SSH tunnel to connect to Jupyter server running remotely and start the internet browser."
 
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter notebook server running remotely 
 # Versions #
 #==========#
 
+# v2.3 - 2021-07-30: detection of lab server added
 # v2.2 - 2021-01-07: bug related to local port detection corrected / bug related to socket and multiple connections corrected
 # v2.1 - 2020-12-23: bug related to connection closing corrected / connection testing added / unnecessary code removed
 # v2.0 - 2020-12-14: option to reach server running on a node of GE added
@@ -179,7 +180,7 @@ set -o pipefail
 if [[ -z "$node" ]]
 then
     # List Jupyter servers
-    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep jupyter-notebook | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
+    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep -E "jupyter-[notebook|lab]" | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
 
     # Check how many Jupyter servers are running
     [[ -z "$mysvr" ]] && error "No server is running. Exiting..." 1
@@ -187,7 +188,7 @@ then
 else
     # Connect to the node and get PID of the Jupyter server (set +/-e to deactivate/reactivate error check otherwise script exits if no notebook)
     set +e
-    mypid_j=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 ssh $node 'pgrep -f jupyter-notebook'")
+    mypid_j=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 ssh $node 'pgrep -f jupyter-[notebook-lab]'")
     set -e
     
     # Check how many Jupyter servers are running
@@ -196,7 +197,7 @@ else
 
     # Get server address from the notebook connection file
     ## Note: runtime folder can be obtained using jupyter --path 
-    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 'cat \$HOME/.local/share/jupyter/runtime/nbserver-$mypid_j-open.html | grep \"a href\" | cut -d \"\\\"\" -f 2'")
+    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 'cat \$HOME/.local/share/jupyter/runtime/*server-$mypid_j-open.html | grep \"a href\" | cut -d \"\\\"\" -f 2'")
 
     # Replace node with localhost
     mysvr=$(sed -r "s|(^h.*/).*(:.*$)|\1localhost\2|" <<< "$mysvr")

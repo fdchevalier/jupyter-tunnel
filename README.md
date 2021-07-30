@@ -1,8 +1,8 @@
 # jupyter-tunnel
 
-The purpose of this script is to connect to a remote [Jupyter notebook](https://jupyter.org/) server through an SSH tunnel. Jupyter notebooks are informatics notebooks that allow executing code and giving context, with the goal of keeping records and improving reproducibility. When a Jupyter notebook server is running remotely, you can connect to it by opening a remote web browser. However, this is usually slow (especially if connection is bad), consumes unnecessary server resources, and forces you to have an additional web browser opened. The tunnel created by this script avoids this by allowing your local browser to connect to the remote server and sending the needed information through the tunnel.
+The purpose of this script is to connect to a remote [Jupyter notebook](https://jupyter.org/) (or JupyterLab) server through an SSH tunnel. Jupyter notebooks are informatics notebooks that allow executing code and giving context, with the goal of keeping records and improving reproducibility. When a Jupyter server is running remotely, you can connect to it by opening a remote web browser. However, this is usually slow (especially if connection is bad), consumes unnecessary server resources, and forces you to have an additional web browser opened. The tunnel created by this script avoids this by allowing your local browser to connect to the remote server and sending the needed information through the tunnel.
 
-In addition to connecting to Jupyter notebook server on a standalone remote server, this script allows connection to Jupyter notebook server running on a node of a Grid Engine cluster.
+In addition to connecting to Jupyter server on a standalone remote server, this script allows connection to Jupyter server running on a node of a Grid Engine cluster.
 
 The script is designed to access the remote server/node through a gateway server. For the moment, there is no option to skip the gateway server.
 
@@ -32,9 +32,9 @@ $ jupyter-tunnel.sh -h
 
      jupyter-tunnel.sh  -h1|--host1 host -h2|--host2 host2 -n|--node name -b|--browser path -s|--ssha -p|--sshp -h|--help
 
-Aim: Create a SSH tunnel to connect to Jupyter notebook server running remotely and start the internet browser.
+Aim: Create a SSH tunnel to connect to Jupyter server running remotely and start the internet browser.
 
-Version: 2.0
+Version: 2.3
 
 Options:
     -h1, --host1    first host to connect to set the tunnel up
@@ -56,8 +56,8 @@ Notes:
 ### Examples
 
 There are two cases that you can encounter:
-* The Jupyter notebook is running on a remote server accessible through a gateway server. In this case, the basic command will be: `jupypter-tunnel.sh -h1 user@gateway.ext -h2 user@server.ext`
-* The Jupyter notebook is running on a node of a Grid Engine cluster accessible through a gateway server. In this case, the basic command will be: `jupypter-tunnel.sh -h1 user@gateway.ext -h2 user@head-node.ext -n server-node.local`
+* The Jupyter server is running on a remote server accessible through a gateway server. In this case, the basic command will be: `jupypter-tunnel.sh -h1 user@gateway.ext -h2 user@server.ext`
+* The Jupyter server is running on a node of a Grid Engine cluster accessible through a gateway server. In this case, the basic command will be: `jupypter-tunnel.sh -h1 user@gateway.ext -h2 user@head-node.ext -n server-node.local`
 
 Note: the `user@server` can be simplified to `server` if you use a SSH config file or if the username of your local machine is the same as the one on the remote machine.
 
