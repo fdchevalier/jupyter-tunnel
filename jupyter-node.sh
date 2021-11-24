@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-node.sh
-# Version: 0.1
+# Version: 0.2
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2021-05-21
-# Modified in: 2021-07-30
+# Modified in: 2021-11-24
 # Licence : GPL v3
 
 
@@ -22,6 +22,7 @@ aim="Start Jupyter server on a node of a SGE cluster from the head node."
 # Versions #
 #==========#
 
+# v0.2 - 2021-11-24: check status of submission
 # v0.1 - 2021-07-30: add option to choose between notebook and lab server / add info message
 # v0.0 - 2021-05-21: creation
 
@@ -36,7 +37,7 @@ version=$(grep -i -m 1 "version" "$0" | cut -d ":" -f 2 | sed "s/^ *//g")
 # Usage message
 function usage {
     echo -e "
-    \e[32m ${0##*/} \e[00m -q|--queue value -n|--node value -l|--log path -t|--type value -h|--help
+    \e[32m ${0##*/} \e[00m -q|--queue value -n|--node value -l|--log path -t|--type value -w|--wait value -h|--help
 
 Aim: $aim
 
@@ -49,6 +50,7 @@ Options:
     -t, --type      server type. Two value possible:
                         * notebook [default]
                         * lab
+    -w, --wait      waiting time before checking submission status [default: 15s]
     -h, --help      this message
     "
 }
@@ -130,10 +132,11 @@ test_dep jupyter
 while [[ $# -gt 0 ]]
 do
     case $1 in
-        -q|--queue  ) myq="$2" ; shift 2 ;;
-        -n|--node   ) myn="$2" ; shift 2 ;;
-        -l|--log    ) mylog="$2" ; shift 2 ;;
+        -q|--queue  ) myq="$2"    ; shift 2 ;;
+        -n|--node   ) myn="$2"    ; shift 2 ;;
+        -l|--log    ) mylog="$2"  ; shift 2 ;;
         -t|--type   ) mytype="$2" ; shift 2 ;;
+        -w|--wait   ) mytime="$2" ; shift 2 ;;
         -h|--help   ) usage ; exit 0 ;;
         *           ) error "Invalid option: $1\n$(usage)" 1 ;;
     esac
@@ -147,6 +150,10 @@ done
 [[ -z "$mylog" ]] && mylog="$(mktemp -t jupyter_nb_${USER}_$(hostname)_XXXXXXX.log)"
 chmod 600 "$mylog"
 
+# Waiting time (must be compatible with sleep)
+[[ -z "$mytime" ]] && mytime=15s
+[[ ! $(egrep -w "^[[:digit:]]+(\.[[:digit:]]+)?[dhms]?$" <<< "$mytime") ]] && error "Waiting time must follow sleep command syntax. Exiting..." 1
+
 # Jupyter server type
 [[ -n "$mytype" && ! "$mytype" =~ ^(notebook|lab)$ ]] && error "Type must be notebook or lab. Exiting..." 1
 [[ -z "$mytype" || "$mytype" == notebook ]] && mytype="notebook" && job_name="notebook"
@@ -159,12 +166,38 @@ chmod 600 "$mylog"
 #============#
 
 # Starting notebook
-qrsh -V -N $job_name $myq $myn \
+(qrsh -V -N $job_name $myq $myn \
     jupyter $mytype \
         --config="$HOME/.jupyter/jupyter_notebook_config.py" \
         --no-browser \
-        --ip=\$\(hostname --fqdn\) &> "$mylog" &
+        --ip=\$\(hostname --fqdn\) &> "$mylog") &
+
+# qrsh PID
+mypid=$!
 
 info "Jupyter $mytype has been submitted to the queue."
+
+# Check submission
+if [[ ! $mytime =~ ^0+[dhms]?$ ]]
+then
+
+    # Pause
+    info "Waiting $mytime before checking submission..."
+    sleep "$mytime"
+
+    # Check if qrsh still exists
+    if [[ ! $(ps -p $mypid -o pid=) ]]
+    then
+        # Wait for qrsh to exit
+        wait $mypid
+
+        # Check qrsh exit status 
+        mystatus=$?
+        [[ $mystatus != 0 ]] && error "An error occurred during job submission. See log $mylog for more information. Exiting..." 1
+    else
+        info  "Submitted job is still running." 
+    fi
+    
+fi
 
 exit 0
