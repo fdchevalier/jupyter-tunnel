@@ -1,9 +1,9 @@
 #!/bin/bash
 # Title: jupyter-tunnel.sh
-# Version: 2.3
+# Version: 3.0
 # Author: Frédéric CHEVALIER <fcheval@txbiomed.org>
 # Created in: 2017-11-05
-# Modified in: 2021-07-30
+# Modified in: 2022-02-22
 # Licence : GPL v3
 
 
@@ -20,6 +20,7 @@ aim="Create a SSH tunnel to connect to Jupyter server running remotely and start
 # Versions #
 #==========#
 
+# v3.0 - 2021-02-22: handle unlimited number of hosts instead of 2 hosts only / update argument names because of conflicts
 # v2.3 - 2021-07-30: detection of lab server added
 # v2.2 - 2021-01-07: bug related to local port detection corrected / bug related to socket and multiple connections corrected
 # v2.1 - 2020-12-23: bug related to connection closing corrected / connection testing added / unnecessary code removed
@@ -42,19 +43,19 @@ version=$(grep -i -m 1 "version" "$0" | cut -d ":" -f 2 | sed "s/^ *//g")
 # Usage message
 function usage {
     echo -e "
-    \e[32m ${0##*/} \e[00m -h1|--host1 host -h2|--host2 host2 -n|--node name -b|--browser path -s|--ssha -p|--sshp -h|--help
+    \e[32m ${0##*/} \e[00m -s|--host host(s) -n|--node name -b|--browser path -a|--ssha -p|--sshp -h|--help
 
 Aim: $aim
 
 Version: $version
 
 Options:
-    -h1, --host1    first host to connect to set the tunnel up
-    -h2, --host2    second host to connect on which Jupyter server is running
+    -s,  --host     host (or list of hosts, space separated) to be contacted to reach the Jupyter server.
+                        If a list, the order must correspond to the order in which hosts must be contacted.
     -b,  --browser  path to the internet browser to start after connection is up [default: firefox]
                         \"n\" or \"none\" prevent starting the browser.
     -n,  --node     node of the Grid Engine cluster running the Jupyter server (optional)
-    -s,  --ssha     force the creation of a new ssh agent
+    -a,  --ssha     force the creation of a new ssh agent
     -p,  --pass     use sshpass to store ssh password
     -h,  --help     this message
     "
@@ -118,6 +119,7 @@ function test_dep {
 #==============#
 
 test_dep ssh
+test_dep curl
 
 
 
@@ -129,17 +131,24 @@ test_dep ssh
 while [[ $# -gt 0 ]]
 do
     case $1 in
-        -h1|--host1  ) host1="$2"   ; shift 2 ;;
-        -h2|--host2  ) host2="$2"   ; shift 2 ;;
+        -s|--host    ) host=("$2") ; shift 2
+                            while [[ -n "$1" && ! "$1" =~ ^- ]]
+                            do
+                                host+=("$1")
+                                shift
+                            done ;;
         -b|--browser ) browser="$2" ; shift 2 ;;
         -n|--node    ) node="$2"    ; shift 2 ;;
-        -s|--ssha    ) ssha=1       ; shift   ;;
+        -a|--ssha    ) ssha=1       ; shift   ;;
         -p|--sshp    ) sshp=1       ; shift   ;;
         -h|--help    ) usage ; exit 0 ;;
         *            ) error "Invalid option: $1\n$(usage)" 1 ;;
     esac
 done
 
+
+# Check for mandatory options
+[[ -z "$host" ]] && error "Server address missing for ssh connection. Exiting..." 1
 
 # Default browser
 [[ -z "$browser" ]] && browser=firefox
@@ -169,9 +178,11 @@ fi
 #============#
 
 # Check connectivity
-mytest=$($myssh -q -A -4 $host1 echo 0)
+mytest=$($myssh -q -A -4 ${host[0]} echo 0)
 [[ -z "$mytest" ]] && error "Wrong password or no connection. Exiting..." 1
 
+# Update host list to include -J if needed
+[[ ${#host[@]} -gt 1 ]] &&  host="-J $(echo ${host[@]} | rev | sed "s/ /,/2g" | rev)"
 
 # Set bash options to stop script if a command exit with non-zero status
 set -e
@@ -180,24 +191,28 @@ set -o pipefail
 if [[ -z "$node" ]]
 then
     # List Jupyter servers
-    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 '\$(ps -u \$USER -o command | grep -E "jupyter-[notebook|lab]" | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1'")
+    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host "\$(ps -u \$USER -o command | grep -E \"jupyter-(notebook|lab)\" | grep -v grep | cut -d \" \" -f -2) list 2> /dev/null | tail -n +2 | cut -d \" \" -f 1")
 
     # Check how many Jupyter servers are running
     [[ -z "$mysvr" ]] && error "No server is running. Exiting..." 1
     [[ $(wc -l <<< "$mysvr") -gt 1 ]] && error "More than one server is running. Exiting..." 1
 else
-    # Connect to the node and get PID of the Jupyter server (set +/-e to deactivate/reactivate error check otherwise script exits if no notebook)
+    # Connect to the node and get username and PID of the Jupyter server (set +/-e to deactivate/reactivate error check otherwise script exits if no notebook)
     set +e
-    mypid_j=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 ssh $node 'pgrep -f jupyter-[notebook-lab]'")
+    myvar=$($myssh -q -A -o AddKeysToAgent=yes -4 $host "ssh $node 'echo \$USER ; pgrep -u \$USER -f jupyter-[notebook-lab]'")
     set -e
     
+    # Split variable values
+    myuser=$(head -n 1 <<< $myvar)
+    mypid_j=$(tail -n +2 <<< $myvar)
+
     # Check how many Jupyter servers are running
     [[ -z "$mypid_j" ]] && error "No server is running. Exiting..." 1
     [[ $(wc -l <<< "$mypid_j") -gt 1 ]] && error "More than one server is running. Exiting..." 1
 
     # Get server address from the notebook connection file
     ## Note: runtime folder can be obtained using jupyter --path 
-    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 "ssh $host2 'cat \$HOME/.local/share/jupyter/runtime/*server-$mypid_j-open.html | grep \"a href\" | cut -d \"\\\"\" -f 2'")
+    mysvr=$($myssh -q -A -o AddKeysToAgent=yes -4 $host "cat \$HOME/.local/share/jupyter/runtime/*server-$mypid_j-open.html | grep \"a href\" | cut -d \"\\\"\" -f 2")
 
     # Replace node with localhost
     mysvr=$(sed -r "s|(^h.*/).*(:.*$)|\1localhost\2|" <<< "$mysvr")
@@ -217,47 +232,33 @@ info "Port used on localhost: $myport_l"
 
 [[ $myport_l != $myport_j ]] && mysvr=$(echo "$mysvr" | sed "s;:$myport_j/;:$myport_l/;")
 
-# Select port on remote server (host1)
-port_list=$($myssh -q $host1 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
-for ((i=9999 ; i <= 40000 ; i++))
-do
-    [[ $(echo "$port_list" | grep -w $i) ]] || break
-done
-myport_r=$i
-info "Port used for the SSH tunnel on $host1: $myport_r"
-
-# Select port on remote server (host2)
-if [[ -n "$node" ]]
-then
-    port_list=$($myssh -q -A -o AddKeysToAgent=yes -4 $host1 ssh $host2 'netstat -ant | tail -n +3 | sed "s/  */\t/g" | cut -f 4 | cut -d ":" -f 2 | sort | uniq')
-    for ((i=9999 ; i <= 40000 ; i++))
-    do
-        [[ $(echo "$port_list" | grep -w $i) ]] || break
-    done
-    myport_r2=$i
-    info "Port used for the SSH tunnel on $host2: $myport_r2"
-fi
+# Edit host for node connection
+[[ -n "$node" ]] && host=$(sed "s/ /,/2g" <<< "$host")
 
 mysocket=/tmp/${USER}_jupyter_socket_$RANDOM
 
 # Create tunnel (must deactivate set -e using set +e otherwise script exits)
+## Note: sshpass does not handle ssh -f is when jump host is used (source: https://serverfault.com/a/1005485)
 set +e
 
 if [[ -z "$node" ]]
 then
-    $myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_j} -N $host2
+    $myssh -q -M -S $mysocket -A -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_j} $host -N &
 else
-    $myssh -q -M -S $mysocket -fA -o ServerAliveInterval=60 -L ${myport_l}:localhost:${myport_r} $host1 ssh -4 -L ${myport_r}:localhost:${myport_r2} $host2 ssh -4 -L ${myport_r2}:$node:${myport_j} -N $node
+    $myssh -q -M -S $mysocket -A -o ServerAliveInterval=60 -L ${myport_l}:$node:${myport_j} $host -N $myuser@$node &
 fi
 
-# Close connections
-function portk {
-    [[ -z $4 ]] && $myssh -q -A $host1 "pkill -f \"ssh .*-L $2:localhost:$1 -N $host2\""
-    [[ -n $4 ]] && $myssh -q -A $host1 ssh $host2 pkill -f \\\"ssh .*-L $3:$4:$1 -N $4\\\"
-}
-
 # Create trap to close ssh tunnel when interrupt
-trap "$myssh -q -S $mysocket -O exit $host1 ; portk ${myport_j} ${myport_r} ${myport_r2} ${node}" SIGINT SIGTERM
+trap "$myssh -q -S $mysocket -O exit $host $node" SIGINT SIGTERM
+
+# Check connectivity (as the tunnel is not set with -f)
+count=0
+while [[ $(curl -s "$mysvr" ; echo $?) -ne 0 ]]
+do
+    sleep 1s
+    ((count++))
+    [[ $count -gt 100 ]] && warning "Connection to $mysvr is not yet established. You may wait a little longer or restart the script." && break
+done
 
 # Start Jupyter page
 if [[ "$browser" != n && "$browser" != none ]]
@@ -265,7 +266,7 @@ then
     echo "$mysvr"
     info "Opening the browser tab..."
     sleep 2s
-    firefox "$mysvr" &
+    $browser "$mysvr" &
 fi
 
 # Wait until interruption
